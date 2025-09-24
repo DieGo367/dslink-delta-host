@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <ctype.h>
 #include <sys/time.h>
 #include <stdint.h>
 #include <fcntl.h>
@@ -120,7 +119,7 @@ int pollSocket(int fd, int events, int timeout) {
 
 	if (!(pfd.revents & events)) {
 		int err = 0;
-		int len = sizeof(err);
+		socklen_t len = sizeof(err);
 		getsockopt(fd, SOL_SOCKET, SO_ERROR, (char*)&err, &len);
 		fprintf(stderr, "socket error 0x%x on poll\n", err);
 		return -1;
@@ -408,7 +407,7 @@ int send3DSXFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh) {
 		goto error;
 	}
 
-	printf("Sending %s, %d bytes\n",name, filesize);
+	printf("Sending %s, %zu bytes\n", name, filesize);
 
 	size_t totalsent = 0, blocks = 0;
 
@@ -437,7 +436,7 @@ int send3DSXFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh) {
 					goto error;
 				}
 
-				if(sendData(sock,have,out)) {
+				if (sendData(sock, have, (char *)out)) {
 					fprintf(stderr,"Failed sending %s\n", name);
 					retval = 1;
 					(void)deflateEnd(&strm);
@@ -454,7 +453,7 @@ int send3DSXFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh) {
 	assert(ret == Z_STREAM_END);        /* stream will be complete */
 	(void)deflateEnd(&strm);
 
-	printf("%u sent (%.2f%%), %d blocks\n",totalsent, (float)(totalsent * 100.0)/ filesize, blocks);
+	printf("%zu sent (%.2f%%), %zu blocks\n", totalsent, (float)(totalsent * 100.0) / filesize, blocks);
 
 	if(recvInt32LE(sock,&response)!=0) {
 		fprintf(stderr,"Failed sending %s\n",name);
@@ -529,8 +528,7 @@ int main(int argc, char **argv) {
 		c = getopt_long (argc, argv, "a:r:shv0:", long_options, &option_index);
 
 		/* Detect the end of the options. */
-		if (c == -1)
-		break;
+		if (c == -1) break;
 
 		switch(c) {
 
