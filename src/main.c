@@ -176,11 +176,11 @@ void timeval_add (struct timeval *result, struct timeval *x, struct timeval *y) 
 }
 
 //---------------------------------------------------------------------------------
-static struct in_addr find3DS(int retries) {
+static struct in_addr findDS(int retries) {
 //---------------------------------------------------------------------------------
 	struct sockaddr_in s, remote, rs;
 	char recvbuf[256];
-	char mess[] = "3dsboot";
+	char mess[] = "dslink-delta-host";
 
 	int broadcastSock = socket(PF_INET, SOCK_DGRAM, 0);
 	if(broadcastSock < 0) perror("create send socket");
@@ -226,7 +226,7 @@ static struct in_addr find3DS(int retries) {
 		socklen_t socklen = sizeof(remote);
 		len = recvfrom(recvSock,recvbuf,sizeof(recvbuf),0,(struct sockaddr *)&remote,&socklen);
 		if ( len != -1) {
-			if ( strncmp("boot3ds",recvbuf,strlen("boot3ds")) == 0) {
+			if (strncmp("dslink-delta-client", recvbuf, strlen("dslink-delta-client")) == 0) {
 				break;
 			}
 		}
@@ -328,7 +328,7 @@ unsigned char in[ZLIB_CHUNK];
 unsigned char out[ZLIB_CHUNK];
 
 //---------------------------------------------------------------------------------
-int send3DSXFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh) {
+int sendNDSFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh) {
 //---------------------------------------------------------------------------------
 
 	int retval = 0;
@@ -486,9 +486,9 @@ static void win32_socket_cleanup(void) {
 void showHelp() {
 //---------------------------------------------------------------------------------
 	puts( PACKAGE_STRING "\n");
-	puts("Usage: 3dslink [options] 3dsxfile\n");
+	printf("Usage: dslink [options] ndsfile\n");
 	puts("--help,     -h   Display this information");
-	puts("--address,  -a   Hostname or IPv4 address of 3DS");
+	puts("--address,  -a   Hostname or IPv4 address of DS");
 	puts("--retries,  -r   number of times to ping before giving up");
 	puts("--arg0,     -0   set argv[0]");
 	puts("--server  , -s   start server after completed upload");
@@ -588,7 +588,7 @@ int main(int argc, char **argv) {
 	}
 
 	if (argv0 == NULL) {
-		strcpy(&cmdbuf[4],"sdmc:/3ds/");
+		strcpy(&cmdbuf[4],"sd:/nds/");
 		strcat(&cmdbuf[4],basename);
 	} else {
 		strcpy(&cmdbuf[4],argv0);
@@ -621,10 +621,10 @@ int main(int argc, char **argv) {
 	dsaddr.s_addr  =  INADDR_NONE;
 
 	if (address == NULL) {
-		dsaddr = find3DS(retries);
+		dsaddr = findDS(retries);
 
 		if (dsaddr.s_addr == INADDR_NONE) {
-			printf("No response from 3DS!\n");
+			printf("No response from DS!\n");
 			return 1;
 		}
 
@@ -641,7 +641,7 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	int res = send3DSXFile(dsaddr.s_addr,basename,filesize,fh);
+	int res = sendNDSFile(dsaddr.s_addr,basename,filesize,fh);
 
 	fclose(fh);
 

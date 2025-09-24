@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.61)
-AC_INIT([3dslink],[0.6.3],[https://github.com/devkitPro/3dslink/issues])
+AC_INIT([dslink-delta],[0.1.0],[https://github.com/DieGo367/dslink-delta-host/issues])
 AC_CONFIG_SRCDIR([src/main.c])
 AM_INIT_AUTOMAKE([subdir-objects])
 
