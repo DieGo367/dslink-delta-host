@@ -4,8 +4,15 @@ aclocal.m4
 autom4te.cache
 config.guess
 config.sub
+config.*
 configure
 depcomp
 install-sh
 missing
 build
+compile
+Makefile
+.deps
+.dirstamp
+*.o
+3dslink
