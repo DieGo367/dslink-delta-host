@@ -11,6 +11,9 @@ AC_CANONICAL_HOST
 
 AC_PROG_CC
 
+AC_CHECK_SIZEOF(size_t)
+AC_CHECK_SIZEOF(unsigned long long)
+
 PKG_CHECK_MODULES([ZLIB], zlib, [
   LIBS="$ZLIB_LIBS $LIBS"
   CFLAGS="$ZLIB_CFLAGS $CFLAGS"
@@ -26,7 +29,7 @@ case "$host" in
       ;;
 esac
 
-CFLAGS="$CFLAGS -std=gnu99"
+CFLAGS="$CFLAGS -std=gnu23"
 
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT

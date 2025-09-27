@@ -3,6 +3,6 @@
 bin_PROGRAMS = dslink
 
 
-dslink_SOURCES = src/main.c
+dslink_SOURCES = src/main.c xdelta/xdelta3.c
 
 EXTRA_DIST = autogen.sh

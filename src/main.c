@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/time.h>
@@ -7,6 +8,7 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <errno.h>
+#include <limits.h>
 
 #ifndef __WIN32__
 #include <sys/socket.h>
@@ -32,8 +34,9 @@ typedef uint32_t in_addr_t;
 
 #include <zlib.h>
 #include <assert.h>
+#include "xdelta/xdelta3.h"
 
-#define ZLIB_CHUNK (16 * 1024)
+#define CHUNK_SIZE (16 * 1024)
 
 #define NETLOADER_COMM_PORT 17491
 
@@ -324,11 +327,11 @@ int recvInt32LE(int socket, int32_t *data) {
 
 }
 
-unsigned char in[ZLIB_CHUNK];
-unsigned char out[ZLIB_CHUNK];
+unsigned char in[CHUNK_SIZE];
+unsigned char out[CHUNK_SIZE];
 
 //---------------------------------------------------------------------------------
-int sendNDSFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh) {
+int sendNDSFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh, FILE *deltaSource) {
 //---------------------------------------------------------------------------------
 
 	int retval = 0;
@@ -361,6 +364,13 @@ int sendNDSFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh) {
 		address.s_addr = dsaddr;
 		fprintf(stderr,"Connection to %s failed\n",inet_ntoa(address));
 		return -1;
+	}
+
+	char mode = deltaSource == NULL ? 0 : 1;
+	if (sendData(sock, 1, &mode)) {
+		fprintf(stderr,"Failed sending transfer mode\n");
+		retval = -1;
+		goto error;
 	}
 
 	int namelen = strlen(name);
@@ -411,47 +421,128 @@ int sendNDSFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh) {
 
 	size_t totalsent = 0, blocks = 0;
 
-
-	do {
-		strm.avail_in = fread(in, 1, ZLIB_CHUNK, fh);
-		if (ferror(fh)) {
-			(void)deflateEnd(&strm);
-			return Z_ERRNO;
+	if (deltaSource) {
+		xd3_stream stream;
+		xd3_config config;
+		xd3_init_config(&config, XD3_ADLER32);
+		config.winsize = (2 * 1024 * 1024);
+		retval = xd3_config_stream(&stream, &config);
+		if (retval != 0) {
+			printf("Error initializing xdelta stream\n");
+			goto error;
 		}
-		flush = feof(fh) ? Z_FINISH : Z_NO_FLUSH;
-		strm.next_in = in;
-		/* run deflate() on input until output buffer not full, finish
-		   compression if all of source has been read in */
-		do {
-			strm.avail_out = ZLIB_CHUNK;
-			strm.next_out = out;
-			ret = deflate(&strm, flush);    /* no bad return value */
-			assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
-			have = ZLIB_CHUNK - strm.avail_out;
 
-			if (have != 0) {
-				if (sendInt32LE(sock,have)) {
-					fprintf(stderr,"Failed sending chunk size\n");
-					retval = -1;
-					goto error;
+		xd3_source source = {0};
+		source.name = name;
+		source.ioh = deltaSource;
+		source.blksize = CHUNK_SIZE;
+		source.curblkno = (xoff_t) -1;
+		source.curblk = NULL;
+		xd3_set_source(&stream, &source);
+
+		usize_t len;
+		int status = XD3_INPUT;
+		bool eof = false;
+
+		while (!eof || status != XD3_INPUT) {
+			switch (status) {
+			case XD3_INPUT:
+				len = fread(in, 1, CHUNK_SIZE, fh);
+				eof = feof(fh);
+				if (eof) {
+					xd3_set_flags(&stream, XD3_FLUSH | stream.flags);
 				}
-
-				if (sendData(sock, have, (char *)out)) {
-					fprintf(stderr,"Failed sending %s\n", name);
-					retval = 1;
-					(void)deflateEnd(&strm);
-					goto error;
+				xd3_avail_input(&stream, in, len);
+				break;
+			case XD3_OUTPUT:
+				len = stream.avail_out;
+				while (len) {
+					int sendSize = len > CHUNK_SIZE ? CHUNK_SIZE : len;
+					if (sendInt32LE(sock, sendSize)) {
+						printf("Failed sending chunk size\n");
+						retval = -1;
+						goto xdelta_cleanup;
+					}
+					if (sendData(sock, sendSize, (char *)stream.next_out)) {
+						printf("Failed sending %s\n", name);
+						retval = -1;
+						goto xdelta_cleanup;
+					}
+					len -= sendSize;
+					blocks++;
 				}
-
-				totalsent += have;
-				blocks++;
+				totalsent += stream.avail_out;
+				xd3_consume_output(&stream);
+				break;
+			case XD3_GETSRCBLK:
+				fseek(source.ioh, source.blksize * source.getblkno, SEEK_SET);
+				source.onblk = fread(out, 1, source.blksize, source.ioh);
+				source.curblk = out;
+				source.curblkno = source.getblkno;
+				break;
+			case XD3_GOTHEADER:
+			case XD3_WINSTART:
+			case XD3_WINFINISH:
+				break;
+			default:
+				printf("xdelta error!\n");
+				retval = status;
+				goto xdelta_cleanup;
 			}
-		} while (strm.avail_out == 0);
-		assert(strm.avail_in == 0);     /* all input will be used */
-		/* done when last data in file processed */
-	} while (flush != Z_FINISH);
-	assert(ret == Z_STREAM_END);        /* stream will be complete */
-	(void)deflateEnd(&strm);
+			status = xd3_encode_input(&stream);
+		}
+
+	xdelta_cleanup:
+		if (xd3_close_stream(&stream) != 0) {
+			printf("Something wrong when closing stream\n");
+		}
+		xd3_free_stream(&stream);
+
+
+		if (retval != 0) goto error;
+	}
+	else {
+		do {
+			strm.avail_in = fread(in, 1, CHUNK_SIZE, fh);
+			if (ferror(fh)) {
+				(void)deflateEnd(&strm);
+				return Z_ERRNO;
+			}
+			flush = feof(fh) ? Z_FINISH : Z_NO_FLUSH;
+			strm.next_in = in;
+			/* run deflate() on input until output buffer not full, finish
+			   compression if all of source has been read in */
+			do {
+				strm.avail_out = CHUNK_SIZE;
+				strm.next_out = out;
+				ret = deflate(&strm, flush);    /* no bad return value */
+				assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
+				have = CHUNK_SIZE - strm.avail_out;
+	
+				if (have != 0) {
+					if (sendInt32LE(sock,have)) {
+						fprintf(stderr,"Failed sending chunk size\n");
+						retval = -1;
+						goto error;
+					}
+	
+					if (sendData(sock, have, (char *)out)) {
+						fprintf(stderr,"Failed sending %s\n", name);
+						retval = 1;
+						(void)deflateEnd(&strm);
+						goto error;
+					}
+	
+					totalsent += have;
+					blocks++;
+				}
+			} while (strm.avail_out == 0);
+			assert(strm.avail_in == 0);     /* all input will be used */
+			/* done when last data in file processed */
+		} while (flush != Z_FINISH);
+		assert(ret == Z_STREAM_END);        /* stream will be complete */
+		(void)deflateEnd(&strm);
+	}
 
 	printf("%zu sent (%.2f%%), %zu blocks\n", totalsent, (float)(totalsent * 100.0) / filesize, blocks);
 
@@ -491,6 +582,7 @@ void showHelp() {
 	puts("--address,  -a   Hostname or IPv4 address of DS");
 	puts("--retries,  -r   number of times to ping before giving up");
 	puts("--arg0,     -0   set argv[0]");
+	puts("--delta,    -d   Enable deltas. Creates and uses [ndsfile].copy");
 	puts("--server  , -s   start server after completed upload");
 	puts("--version , -v   show version.");
 	puts("\n");
@@ -504,6 +596,7 @@ int main(int argc, char **argv) {
 	char *endarg = NULL;
 	int retries = 10;
 	int server = 0;
+	bool useDeltas = false;
 
 	if (argc < 2) {
 		showHelp();
@@ -516,6 +609,7 @@ int main(int argc, char **argv) {
 			{"retries", required_argument, 0, 'r'},
 			{"arg0",    required_argument, 0, '0'},
 			{"args",    required_argument, 0,  1 },
+			{"delta",   no_argument,       0, 'd'},
 			{"server",  no_argument,       0, 's'},
 			{"version", no_argument,       0, 'v'},
 			{"help",    no_argument,       0, 'h'},
@@ -525,7 +619,7 @@ int main(int argc, char **argv) {
 		/* getopt_long stores the option index here. */
 		int option_index = 0, c;
 
-		c = getopt_long (argc, argv, "a:r:shv0:", long_options, &option_index);
+		c = getopt_long (argc, argv, "a:r:dshv0:", long_options, &option_index);
 
 		/* Detect the end of the options. */
 		if (c == -1) break;
@@ -546,6 +640,9 @@ int main(int argc, char **argv) {
 			break;
 		case '0':
 			argv0 = optarg;
+			break;
+		case 'd':
+			useDeltas = true;
 			break;
 		case 's':
 			server = 1;
@@ -608,6 +705,19 @@ int main(int argc, char **argv) {
 	cmdbuf[2] = (cmdlen>>16) & 0xff;
 	cmdbuf[3] = (cmdlen>>24) & 0xff;
 
+	FILE *deltaSource = NULL;
+	char sourceName[PATH_MAX];
+	snprintf(sourceName, PATH_MAX, "%s.copy", filename);
+	if (useDeltas) {
+		deltaSource = fopen(sourceName, "rb");
+		if (deltaSource == NULL) {
+			printf("Previous copy not found.\n");
+		}
+		else {
+			printf("Using %s as the delta source\n", sourceName);
+		}
+	}
+
 #ifdef __WIN32__
 	WSADATA wsa_data;
 	if (WSAStartup (MAKEWORD(2,2), &wsa_data)) {
@@ -641,9 +751,24 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	int res = sendNDSFile(dsaddr.s_addr,basename,filesize,fh);
+	int res = sendNDSFile(dsaddr.s_addr, basename, filesize, fh, deltaSource);
 
 	fclose(fh);
+	if (deltaSource) fclose(deltaSource);
+
+	if (res == 0 && useDeltas) {
+		FILE *sent = fopen(filename, "rb");
+		FILE *copy = fopen(sourceName, "wb");
+		if (copy != NULL && sent != NULL) {
+			int c;
+			while ((c = fgetc(sent)) != EOF) {
+				fputc(c, copy);
+			}
+			printf("Saved %s\n", sourceName);
+		}
+		if (sent) fclose(sent);
+		if (copy) fclose(copy);
+	}
 
 	if (server) {
 		printf("starting server\n");
