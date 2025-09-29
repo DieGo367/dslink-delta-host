@@ -428,7 +428,7 @@ int sendNDSFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh, FILE *d
 		config.winsize = (2 * 1024 * 1024);
 		retval = xd3_config_stream(&stream, &config);
 		if (retval != 0) {
-			printf("Error initializing xdelta stream\n");
+			fprintf(stderr, "Error initializing xdelta stream\n");
 			goto error;
 		}
 
@@ -459,12 +459,12 @@ int sendNDSFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh, FILE *d
 				while (len) {
 					int sendSize = len > CHUNK_SIZE ? CHUNK_SIZE : len;
 					if (sendInt32LE(sock, sendSize)) {
-						printf("Failed sending chunk size\n");
+						fprintf(stderr, "Failed sending chunk size\n");
 						retval = -1;
 						goto xdelta_cleanup;
 					}
 					if (sendData(sock, sendSize, (char *)stream.next_out)) {
-						printf("Failed sending %s\n", name);
+						fprintf(stderr, "Failed sending %s\n", name);
 						retval = -1;
 						goto xdelta_cleanup;
 					}
@@ -485,7 +485,7 @@ int sendNDSFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh, FILE *d
 			case XD3_WINFINISH:
 				break;
 			default:
-				printf("xdelta error!\n");
+				fprintf(stderr, "xdelta error!\n");
 				retval = status;
 				goto xdelta_cleanup;
 			}
@@ -494,7 +494,7 @@ int sendNDSFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh, FILE *d
 
 	xdelta_cleanup:
 		if (xd3_close_stream(&stream) != 0) {
-			printf("Something wrong when closing stream\n");
+			fprintf(stderr, "Something wrong when closing stream\n");
 		}
 		xd3_free_stream(&stream);
 
