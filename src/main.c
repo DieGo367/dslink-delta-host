@@ -319,7 +319,7 @@ int recvInt32LE(int socket, int32_t *data) {
 	int len = recvData(socket,intbuf,4,0);
 
 	if (len == 4) {
-		*data = intbuf[0] & 0xff + (intbuf[1] <<  8) + (intbuf[2] <<  16) + (intbuf[3] <<  24);
+		*data = intbuf[0] | intbuf[1] << 8 | intbuf[2] << 16 | intbuf[3] << 24;
 		return 0;
 	}
 
