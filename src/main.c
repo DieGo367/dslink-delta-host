@@ -405,16 +405,21 @@ int sendNDSFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh, FILE *d
 		switch(response) {
 			case -1:
 				fprintf(stderr,"Failed to create file\n");
-				break;
+				retval = 1;
+				goto error;
 			case -2:
 				fprintf(stderr,"Insufficient space\n");
-				break;
+				retval = 1;
+				goto error;
 			case -3:
 				fprintf(stderr,"Insufficient memory\n");
+				retval = 1;
+				goto error;
+			case -4:
+				printf("Source not found on DS, sending complete file\n");
+				deltaSource = NULL;
 				break;
 		}
-		retval = 1;
-		goto error;
 	}
 
 	printf("Sending %s, %zu bytes\n", name, filesize);
