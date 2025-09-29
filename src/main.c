@@ -393,6 +393,20 @@ int sendNDSFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh, FILE *d
 		goto error;
 	}
 
+	if (deltaSource) {
+		uint32_t checksum = adler32(0, NULL, 0);
+		while (!feof(deltaSource)) {
+			size_t read = fread(in, 1, CHUNK_SIZE, deltaSource);
+			checksum = adler32(checksum, in, read);
+		}
+		fseek(deltaSource, 0, SEEK_SET);
+		if (sendInt32LE(sock, checksum)) {
+			fprintf(stderr, "Failed sending source checksum\n");
+			retval = -1;
+			goto error;
+		}
+	}
+
 	int response;
 
 	if(recvInt32LE(sock,&response)!=0) {
@@ -417,6 +431,10 @@ int sendNDSFile(in_addr_t dsaddr, char *name, size_t filesize, FILE *fh, FILE *d
 				goto error;
 			case -4:
 				printf("Source not found on DS, sending complete file\n");
+				deltaSource = NULL;
+				break;
+			case -5:
+				printf("Mismatched checksum, sending complete file\n");
 				deltaSource = NULL;
 				break;
 		}
