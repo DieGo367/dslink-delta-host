@@ -605,7 +605,7 @@ void showHelp() {
 	puts("--address,  -a   Hostname or IPv4 address of DS");
 	puts("--retries,  -r   number of times to ping before giving up");
 	puts("--arg0,     -0   set argv[0]");
-	puts("--delta,    -d   Enable deltas. Creates and uses [ndsfile].copy");
+	puts("--full,     -f   Send a full copy of the file instead of a delta");
 	puts("--server  , -s   start server after completed upload");
 	puts("--version , -v   show version.");
 	puts("\n");
@@ -619,7 +619,7 @@ int main(int argc, char **argv) {
 	char *endarg = NULL;
 	int retries = 10;
 	int server = 0;
-	bool useDeltas = false;
+	bool useDeltas = true;
 
 	if (argc < 2) {
 		showHelp();
@@ -632,7 +632,7 @@ int main(int argc, char **argv) {
 			{"retries", required_argument, 0, 'r'},
 			{"arg0",    required_argument, 0, '0'},
 			{"args",    required_argument, 0,  1 },
-			{"delta",   no_argument,       0, 'd'},
+			{"full",    no_argument,       0, 'f'},
 			{"server",  no_argument,       0, 's'},
 			{"version", no_argument,       0, 'v'},
 			{"help",    no_argument,       0, 'h'},
@@ -642,7 +642,7 @@ int main(int argc, char **argv) {
 		/* getopt_long stores the option index here. */
 		int option_index = 0, c;
 
-		c = getopt_long (argc, argv, "a:r:dshv0:", long_options, &option_index);
+		c = getopt_long (argc, argv, "a:r:fshv0:", long_options, &option_index);
 
 		/* Detect the end of the options. */
 		if (c == -1) break;
@@ -664,8 +664,8 @@ int main(int argc, char **argv) {
 		case '0':
 			argv0 = optarg;
 			break;
-		case 'd':
-			useDeltas = true;
+		case 'f':
+			useDeltas = false;
 			break;
 		case 's':
 			server = 1;
@@ -779,7 +779,7 @@ int main(int argc, char **argv) {
 	fclose(fh);
 	if (deltaSource) fclose(deltaSource);
 
-	if (res == 0 && useDeltas) {
+	if (res == 0) {
 		FILE *sent = fopen(filename, "rb");
 		FILE *copy = fopen(sourceName, "wb");
 		if (copy != NULL && sent != NULL) {
